@@ -1,0 +1,12 @@
+.{
+    .name = .voltage_points_calculator,
+    .version = "0.0.0",
+    .fingerprint = 0xfa8f1a38eaee74c3,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "voltage.zig",
+    },
+}
