@@ -3,13 +3,63 @@ const assert = std.debug.assert;
 const eql = std.mem.eql;
 const startsWith = std.mem.startsWith;
 
-const boulder_pattern = "boulder ";
-const max_boulder_number = 50;
+const max_boulder_number = std.math.maxInt(u15);
 
 /// Used to compute the scale factor for the score of a boulder. Takes in the
 /// number of tops of that boulder.
-fn scaleFactor(num_tops: anytype) f32 {
+fn scaleFactor(num_tops: u32) f32 {
     return 1.0 / @as(f32, @floatFromInt(@max(1, num_tops)));
+}
+
+pub fn main() !void {
+    var timer = std.time.Timer.start() catch unreachable;
+    defer std.log.info("Completed in {:.3}ms", .{@as(f32, @floatFromInt(timer.read())) / std.time.ns_per_ms});
+
+    var sfa = std.heap.stackFallback(128 * 1024, std.heap.page_allocator);
+    const gpa = sfa.get();
+
+    var out = std.fs.File.stdout();
+    var iobuf: [1024]u8 = undefined;
+    var writer = out.writer(&iobuf);
+
+    const args = parseArgs(gpa) catch |e| help(e);
+    if (args.csv_params) |params| {
+        var prng = std.Random.DefaultPrng.init(0);
+        const rng = prng.random();
+        const descr = try params.generateRandomDescriptors(gpa, rng);
+        try writeTestCsv(&writer.interface, rng, descr, params);
+        try writer.interface.flush();
+        return;
+    }
+
+    const score_file = blk: {
+        var tmpsfa = std.heap.stackFallback(128 * 1024, std.heap.page_allocator);
+        const score_file = try ScoreFile.init(gpa, tmpsfa.get(), args.scores, args.csv_sub_path);
+        break :blk score_file;
+    };
+
+    if (args.debug) {
+        try writeStuffAsJson(&writer.interface, score_file, args.prettify_json);
+        try writer.interface.writeAll("\n\n");
+        try writer.interface.flush();
+        return;
+    }
+
+    const summary = try Summary.init(gpa, args.scores, score_file);
+    try writeStuffAsJson(&writer.interface, summary, args.prettify_json);
+    try writer.interface.writeByte('\n');
+    try writer.interface.flush();
+}
+
+fn writeStuffAsJson(
+    writer: *std.Io.Writer,
+    stuff: anytype,
+    prettify: bool,
+) std.Io.Writer.Error!void {
+    try (std.json.Formatter(@TypeOf(stuff)){
+        .value = stuff,
+        .options = if (prettify) .{ .whitespace = .indent_2 } else .{},
+    }).format(writer);
 }
 
 const Tops = struct {
@@ -41,83 +91,49 @@ const Category = enum {
     }
 };
 
+const boulder_starts_with = "boulder ";
+const email_starts_with = "email";
+const first_name_starts_with = "first name";
+const last_name_starts_with = "last name";
+const category_starts_with = "category";
+
 const pattern = struct {
     pub fn isBoulderColumn(
         lowercase_name: []const u8,
     ) bool {
-        return std.mem.startsWith(u8, lowercase_name, boulder_pattern);
+        return std.mem.startsWith(u8, lowercase_name, boulder_starts_with);
     }
 
     pub fn extractBoulderNumber(
         lowercase_boulder_column_name: []const u8,
-    ) !u16 {
-        return std.fmt.parseInt(u16, lowercase_boulder_column_name[boulder_pattern.len..], 10);
+    ) !u15 {
+        return std.fmt.parseInt(u15, lowercase_boulder_column_name[boulder_starts_with.len..], 10);
     }
 
     pub fn isEmailColumn(
         lowercase_name: []const u8,
     ) bool {
-        return std.mem.startsWith(u8, lowercase_name, "email");
+        return std.mem.startsWith(u8, lowercase_name, email_starts_with);
     }
 
     pub fn isFirstNameColumn(
         lowercase_name: []const u8,
     ) bool {
-        return std.mem.startsWith(u8, lowercase_name, "first name");
+        return std.mem.startsWith(u8, lowercase_name, first_name_starts_with);
     }
 
     pub fn isLastNameColumn(
         lowercase_name: []const u8,
     ) bool {
-        return std.mem.startsWith(u8, lowercase_name, "last name");
+        return std.mem.startsWith(u8, lowercase_name, last_name_starts_with);
     }
 
     pub fn isCategoryColumn(
         lowercase_name: []const u8,
     ) bool {
-        return std.mem.startsWith(u8, lowercase_name, "category");
+        return std.mem.startsWith(u8, lowercase_name, category_starts_with);
     }
 };
-
-pub fn main() !void {
-    var sfa = std.heap.stackFallback(128 * 1024, std.heap.page_allocator);
-    const gpa = sfa.get();
-    defer std.log.info("fba end index at {}/{} = {:.2}%", .{
-        sfa.fixed_buffer_allocator.end_index,
-        sfa.fixed_buffer_allocator.buffer.len,
-        100 * @as(f32, @floatFromInt(sfa.fixed_buffer_allocator.end_index)) / @as(f32, @floatFromInt(sfa.fixed_buffer_allocator.buffer.len)),
-    });
-
-    const args = try parseArgs(gpa);
-    const score_file = try ScoreFile.parse(gpa, std.heap.page_allocator, args.csv_sub_path);
-
-    for (score_file.competitors) |*competitor| {
-        for (competitor.results, score_file.boulders) |result, top_data| {
-            competitor.score += top_data.calculateScoreFor(args.scores, competitor.category, result);
-        }
-    }
-
-    var out = std.fs.File.stdout();
-    var iobuf: [1024]u8 = undefined;
-    var writer = out.writer(&iobuf);
-
-    if (args.debug) {
-        try (std.json.Formatter(ScoreFile){
-            .value = score_file,
-            .options = .{ .whitespace = .indent_2 },
-        }).format(&writer.interface);
-        try writer.interface.writeAll("\n\n");
-    }
-
-    const summary = try Summary.init(gpa, args.scores, score_file);
-
-    try (std.json.Formatter(Summary){
-        .value = summary,
-        .options = .{ .whitespace = .indent_2 },
-    }).format(&writer.interface);
-    try writer.interface.writeByte('\n');
-    try writer.interface.flush();
-}
 
 const Summary = struct {
     /// keyed by the category. Each competitor list should be sorted by score
@@ -263,9 +279,10 @@ const ScoreFile = struct {
         score: f32,
     };
 
-    fn parse(
+    fn init(
         gpa: std.mem.Allocator,
         temp_allocator: std.mem.Allocator,
+        scores: Args.Scores,
         sub_path: [:0]const u8,
     ) !ScoreFile {
         var file_data_list = blk: {
@@ -301,6 +318,12 @@ const ScoreFile = struct {
             try competitors.append(gpa, competitor);
         }
 
+        for (competitors.items) |*competitor| {
+            for (competitor.results, boulder_top_data) |result, top_data| {
+                competitor.score += top_data.calculateScoreFor(scores, competitor.category, result);
+            }
+        }
+
         return ScoreFile{
             .header = file_header,
             .boulders = boulder_top_data,
@@ -325,7 +348,7 @@ const ScoreFile = struct {
             // must be a boulder number otherwise
             _,
 
-            pub fn initBoulder(boulder_number: u16) Descriptor {
+            pub fn initBoulder(boulder_number: u15) Descriptor {
                 assert(boulder_number > 0);
                 assert(boulder_number <= max_boulder_number);
                 return @enumFromInt(boulder_number - 1);
@@ -425,7 +448,37 @@ const ScoreFile = struct {
 const Args = struct {
     csv_sub_path: [:0]const u8,
     scores: Scores,
+    prettify_json: bool,
     debug: bool,
+    csv_params: ?CsvOpts,
+
+    const CsvOpts = struct {
+        num_competitors: u16 = 1000,
+        num_boulders: u15 = max_boulder_number,
+        num_junk_columns: u32 = 1000,
+        min_junk_line_len: u32 = 10,
+        max_junk_line_len: u32 = 20,
+
+        fn generateRandomDescriptors(
+            self: CsvOpts,
+            gpa: std.mem.Allocator,
+            rng: std.Random,
+        ) ![]ScoreFile.Header.Descriptor {
+            var descriptors = std.ArrayList(ScoreFile.Header.Descriptor).empty;
+            try descriptors.appendSlice(gpa, &.{ .category, .last_name, .email, .first_name });
+
+            for (1..@as(u16, self.num_boulders) + 1) |b| {
+                try descriptors.append(gpa, .initBoulder(@intCast(b)));
+            }
+
+            try descriptors.appendNTimes(gpa, .skip, self.num_junk_columns);
+
+            // dont fuck with category
+            rng.shuffle(ScoreFile.Header.Descriptor, descriptors.items[1..]);
+
+            return descriptors.toOwnedSlice(gpa);
+        }
+    };
 
     const Scores = struct {
         flash: f32 = default_flash,
@@ -463,63 +516,160 @@ fn parseIntArg(
     return null;
 }
 
-fn parseStringArg(
-    comptime long_name: []const u8,
-    comptime short_name: []const u8,
-    arg: [:0]const u8,
-    it: *std.process.ArgIterator,
-) !?[:0]const u8 {
-    if (eql(u8, arg, "-" ++ short_name) or eql(u8, arg, "--" ++ long_name)) {
-        return it.next() orelse return error.MoreArgsRequired;
-    }
-
-    if (startsWith(u8, arg, "-" ++ short_name ++ "=")) {
-        return arg[short_name.len + 2 ..];
-    }
-
-    if (startsWith(u8, arg, "--" ++ long_name ++ "=")) {
-        return arg[long_name.len + 3 ..];
-    }
-
-    return null;
-}
-
 fn parseFlagArg(
     comptime long_name: []const u8,
     comptime short_name: []const u8,
     arg: [:0]const u8,
-) !?bool {
-    if (eql(u8, arg, "-" ++ short_name) or eql(u8, arg, "--" ++ long_name)) {
-        return true;
-    }
-
-    return null;
+) bool {
+    return eql(u8, arg, "-" ++ short_name) or eql(u8, arg, "--" ++ long_name);
 }
 
+fn help(e: ?anyerror) noreturn {
+    const usage =
+        \\USAGE
+        \\      voltage [OPTIONS] <FILE>
+        \\
+        \\DESCRIPTION
+        \\      Reads in a score sheet csv file and computes the score for each
+        \\      competitor based on the internal scale factor function.
+        \\
+        \\FILE FORMAT
+        \\      The program expects a csv with column names `First Name`, `Last Name`,
+        \\      `Email`, `Category` and `Boulder n`. The case of the names doesn't matter.
+        \\      The `n` in a boulder column counts up from 1 and can be at most 32767.
+        \\      They need not be consecutive. Because I am lazy the `Category` column
+        \\      must come before the `Boulder *` columns.
+        \\
+        \\SCORE CALCULATION
+        \\      A `result` refers to either a `zone`, `top` or `flash`. The
+        \\      `flash` result is treated as a special form of `top` so it's scale
+        \\      factor is the same. The adjusted score for a specific result is
+        \\      calculated as follows:
+        \\
+        \\      `starting_score_for_result * scaleFactor(num_competitors_with_same_result)`
+        \\
+        \\      The `scaleFactor` function outputs a number between 1 and 0
+        \\      determined by `num_competitors_with_same_result`. The default scale
+        \\      factor function is `1/n`.
+        \\
+        \\      By adding all the adjusted scores for all boulders you get the
+        \\      final score for a competitor.
+        \\
+        \\OPTIONS
+        \\      General remarks: Command-line options like '-l'/'--language'
+        \\      that take values can be specified as either '--language value',
+        \\      '--language=value', '-l value' or '-l=value'.
+        \\
+        \\      -h, --help
+        \\
+        \\              Print this menu and exit.
+        \\
+        \\      -p, --prettify
+        \\
+        \\              Prettify the json output,
+        \\
+        \\      -z, --zone-score <unsigned int>
+        \\
+        \\              The default score for getting a zone.
+        \\
+        \\      -t, --top-score <unsigned int>
+        \\
+        \\              The default score for getting a top.
+        \\
+        \\      -f, --flash-score <unsigned int>
+        \\
+        \\              The default score for getting a flash.
+        \\
+        \\      -o, --output-csv
+        \\
+        \\              Write a csv to stdout in the correct format for this
+        \\              parser filled with junk values and exit. Mainly used for testing.
+        \\
+        \\      -j, --num-junk-columns <u32>
+        \\
+        \\              The number of columns in the csv which will be ignored.
+        \\              Used to slow down parsing for testing.
+        \\
+        \\      -min, --min-junk-line-len <u32>
+        \\
+        \\              Minium characters in a row entry for a junk column. Used
+        \\              to slow down parsing for testing.
+        \\
+        \\      -max, --max-junk-line-len <u32>
+        \\
+        \\              Maximum characters in a row entry for a junk column.
+        \\              Used to slow down parsing for testing. Should be more than minimum
+        \\              characters.
+        \\
+        \\      -c, --num-competitors <u16>
+        \\
+        \\              Number of competitors to generate. Used to slow down
+        \\              parsing for testing.
+        \\
+        \\      -b, --num-boulders <u16>
+        \\
+        \\              Number of boulder entries to generate. Used to slow down
+        \\              parsing for testing.
+        \\
+        \\      -d, --debug <u16>
+        \\
+        \\              Write the parsed file to stdout.
+    ;
+
+    if (e) |err| std.debug.print("error: {t}\n\n", .{err});
+    std.debug.print("{s}\n", .{usage});
+    std.process.exit(0);
+}
 fn parseArgs(_: std.mem.Allocator) !Args {
-    var csv_sub_path: [:0]const u8 = "/home/jacob/Downloads/Resistance Qualifiers.csv";
+    var csv_sub_path: [:0]const u8 = &.{};
     var zone_score: i32 = Args.Scores.default_flash;
     var top_score: i32 = Args.Scores.default_flash;
     var flash_score: i32 = Args.Scores.default_flash;
     var debug: bool = false;
+    var prettify: bool = false;
+    var wants_csv: bool = false;
+    var csv_params = Args.CsvOpts{};
 
     var it = std.process.args();
 
     if (!it.skip()) return error.ArgParseFailed;
 
     while (it.next()) |arg| {
-        if (try parseStringArg("csv-sub-path", "p", arg, &it)) |sub_path| {
-            csv_sub_path = sub_path;
-        } else if (try parseIntArg(i32, "zone-score", "z", arg, &it)) |zonesc| {
+        if (try parseIntArg(i32, "zone-score", "z", arg, &it)) |zonesc| {
             zone_score = zonesc;
+        } else if (parseFlagArg("help", "h", arg)) {
+            help(null);
         } else if (try parseIntArg(i32, "top-score", "t", arg, &it)) |topsc| {
             top_score = topsc;
         } else if (try parseIntArg(i32, "flash-score", "f", arg, &it)) |flashsc| {
             flash_score = flashsc;
-        } else if (try parseFlagArg("debug", "d", arg)) |flag| {
-            debug = flag;
+        } else if (parseFlagArg("output-csv", "o", arg)) {
+            wants_csv = true;
+        } else if (parseFlagArg("prettify", "p", arg)) {
+            prettify = true;
+        } else if (try parseIntArg(u32, "num-junk-columns", "j", arg, &it)) |num_junk_columns| {
+            wants_csv = true;
+            csv_params.num_junk_columns = num_junk_columns;
+        } else if (try parseIntArg(u32, "min-junk-line-len", "min", arg, &it)) |min_junk_line_len| {
+            wants_csv = true;
+            csv_params.min_junk_line_len = min_junk_line_len;
+        } else if (try parseIntArg(u32, "max-junk-line-len", "max", arg, &it)) |max_junk_line_len| {
+            wants_csv = true;
+            csv_params.max_junk_line_len = max_junk_line_len;
+        } else if (try parseIntArg(u16, "num-competitors", "c", arg, &it)) |num_competitors| {
+            wants_csv = true;
+            csv_params.num_competitors = num_competitors;
+        } else if (try parseIntArg(u15, "num-boulders", "b", arg, &it)) |num_boulders| {
+            wants_csv = true;
+            csv_params.num_boulders = num_boulders;
+        } else if (parseFlagArg("debug", "d", arg)) {
+            debug = true;
+        } else {
+            csv_sub_path = arg;
         }
     }
+
+    if (csv_sub_path.len == 0) return error.ExpectedCSVPath;
 
     return Args{
         .csv_sub_path = csv_sub_path,
@@ -528,6 +678,8 @@ fn parseArgs(_: std.mem.Allocator) !Args {
             .top = @floatFromInt(top_score),
             .flash = @floatFromInt(flash_score),
         },
+        .csv_params = if (wants_csv) csv_params else null,
+        .prettify_json = prettify,
         .debug = debug,
     };
 }
@@ -543,4 +695,96 @@ fn lower(in: []const u8) []const u8 {
 fn trim(in: []const u8) []const u8 {
     const trimchars: []const u8 = std.ascii.whitespace ++ "\",\\";
     return std.mem.trim(u8, in, trimchars);
+}
+
+fn writeTestCsv(
+    writer: *std.Io.Writer,
+    rng: std.Random,
+    descriptors: []const ScoreFile.Header.Descriptor,
+    opts: Args.CsvOpts,
+) std.Io.Writer.Error!void {
+    const special_chars = ",\"";
+    const junk_letters: []const u8 = std.ascii.letters ++ " 0123456789'\\[]{}~!@#$%^&*()`" ++ special_chars;
+
+    // write header
+    for (0.., descriptors) |i, d| {
+        try writer.writeByte('"');
+
+        switch (d) {
+            .skip => {
+                const junk_size = rng.intRangeAtMost(usize, opts.min_junk_line_len, opts.max_junk_line_len);
+                for (0..junk_size) |_| {
+                    const junk_index = rng.intRangeLessThan(usize, 0, junk_letters.len);
+                    const letter = junk_letters[junk_index];
+                    if (std.mem.containsAtLeastScalar(u8, special_chars, 1, letter)) {
+                        @branchHint(.unlikely);
+                        try writer.writeByte('\\');
+                    }
+                    try writer.writeByte(letter);
+                }
+            },
+            .email => try writer.writeAll(email_starts_with),
+            .first_name => try writer.writeAll(first_name_starts_with),
+            .last_name => try writer.writeAll(last_name_starts_with),
+            .category => try writer.writeAll(category_starts_with),
+            _ => {
+                try writer.writeAll(boulder_starts_with);
+                try writer.printInt(1 + d.asBoulderIndex().?, 10, .lower, .{});
+            },
+        }
+
+        try writer.writeByte('"');
+        if (i != descriptors.len - 1) {
+            try writer.writeByte(',');
+        }
+    }
+
+    // write competitors
+    for (0..opts.num_competitors) |_| {
+        try writer.writeByte('\n');
+        for (0.., descriptors) |i, d| {
+            try writer.writeByte('"');
+
+            switch (d) {
+                .skip => {
+                    const size = rng.intRangeAtMost(usize, 10, 50);
+                    for (0..size) |_| {
+                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
+                    }
+                },
+                .email => {
+                    const size = rng.intRangeAtMost(usize, 10, 50);
+                    for (0..size) |_| {
+                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
+                    }
+                },
+                .first_name => {
+                    const size = rng.intRangeAtMost(usize, 10, 50);
+                    for (0..size) |_| {
+                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
+                    }
+                },
+                .last_name => {
+                    const size = rng.intRangeAtMost(usize, 10, 50);
+                    for (0..size) |_| {
+                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
+                    }
+                },
+                .category => try writer.writeAll(@tagName(rng.enumValue(Category))),
+                _ => {
+                    const result = rng.enumValue(BoulderResult);
+                    if (result == .no_send and rng.boolean()) {
+                        try writer.writeAll(&.{});
+                    } else {
+                        try writer.writeAll(@tagName(result));
+                    }
+                },
+            }
+
+            try writer.writeByte('"');
+            if (i != descriptors.len - 1) {
+                try writer.writeByte(',');
+            }
+        }
+    }
 }

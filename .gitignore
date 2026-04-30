@@ -3,3 +3,4 @@ zig-out/
 **assets/
 **.qoi
 **.csv
+**.json

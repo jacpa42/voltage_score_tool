@@ -6,9 +6,10 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "voltage",
-        .use_llvm = optimize == .Debug,
+        .use_llvm = if (optimize == .Debug) true else null,
         .root_module = b.createModule(.{
             .root_source_file = b.path("voltage.zig"),
+            .strip = optimize != .Debug,
             .target = target,
             .optimize = optimize,
         }),
