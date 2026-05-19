@@ -669,7 +669,7 @@ fn parseArgs(_: std.mem.Allocator) !Args {
         }
     }
 
-    if (csv_sub_path.len == 0) return error.ExpectedCSVPath;
+    if (csv_sub_path.len == 0 and !debug and !wants_csv) return error.ExpectedCSVPath;
 
     return Args{
         .csv_sub_path = csv_sub_path,
@@ -747,24 +747,18 @@ fn writeTestCsv(
 
             switch (d) {
                 .skip => {
-                    const size = rng.intRangeAtMost(usize, 10, 50);
-                    for (0..size) |_| {
-                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
+                    const junk_size = rng.intRangeAtMost(usize, opts.min_junk_line_len, opts.max_junk_line_len);
+                    for (0..junk_size) |_| {
+                        const junk_index = rng.intRangeLessThan(usize, 0, junk_letters.len);
+                        const letter = junk_letters[junk_index];
+                        if (std.mem.containsAtLeastScalar(u8, special_chars, 1, letter)) {
+                            @branchHint(.unlikely);
+                            try writer.writeByte('\\');
+                        }
+                        try writer.writeByte(letter);
                     }
                 },
-                .email => {
-                    const size = rng.intRangeAtMost(usize, 10, 50);
-                    for (0..size) |_| {
-                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
-                    }
-                },
-                .first_name => {
-                    const size = rng.intRangeAtMost(usize, 10, 50);
-                    for (0..size) |_| {
-                        try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
-                    }
-                },
-                .last_name => {
+                .email, .first_name, .last_name => {
                     const size = rng.intRangeAtMost(usize, 10, 50);
                     for (0..size) |_| {
                         try writer.writeByte(std.ascii.letters[rng.intRangeLessThan(usize, 0, std.ascii.letters.len)]);
