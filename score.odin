@@ -45,7 +45,7 @@ Competitor :: struct #all_or_none {
 	top:             bit_set[BoulderTag],
 	flash:           bit_set[BoulderTag],
 	category:        Category,
-	score:           int,
+	score:           f32,
 }
 
 Boulder :: struct {
@@ -56,10 +56,13 @@ Boulder :: struct {
 main :: proc() {
 	context.logger.procedure = logfn
 	context.logger.lowest_level = .Info
+
+	csv_data, csv_err := os.read_entire_file(os.stdin, context.allocator)
+	assert(csv_err == nil)
+
 	arena: mem.Arena
 	mem.arena_init(&arena, make([]byte, 512 * 1024))
 	context.allocator = mem.arena_allocator(&arena)
-
 	defer fmt.eprintfln(
 		"len={}\noffset={}\npeak_used={}\ntemp_count={}",
 		len(arena.data),
@@ -67,8 +70,6 @@ main :: proc() {
 		arena.peak_used,
 		arena.temp_count,
 	)
-
-	csv_data, csv_err := os.read_entire_file(os.stdin, context.allocator)
 
 	// Parse csv :)
 	competitors := make([dynamic]Competitor, 0, 256)
@@ -97,7 +98,7 @@ main :: proc() {
 
 	for c in competitors[:] {
 		fmt.eprintfln(
-			"{} %5d : {} {} | {}",
+			"{} %5.2f : {} {} | {}",
 			c.category,
 			c.score,
 			c.first_name,
@@ -112,22 +113,22 @@ main :: proc() {
 
 decay :: proc(b: Boulder) -> f32 {
 	k :: 0.01
-	return math.exp_f32(-k * f32(b.tops + b.flashes))
+	return math.exp(-k * f32(b.tops + b.flashes))
 }
 
-top_score :: proc(boulder: Boulder) -> int {
-	return int(10_000 * decay(boulder))
+top_score :: proc(b: Boulder) -> f32 {
+	return 10_000 * decay(b)
 }
 
-flash_score :: proc(boulder: Boulder) -> int {
-	return int(11_000 * decay(boulder))
+flash_score :: proc(b: Boulder) -> f32 {
+	return 1.1 * top_score(b)
 }
 
 // Only adds the top_n boulders to the score
 //
 // odinfmt: disable
-competitor_score :: proc(c: Competitor) -> int {
-	scores: [len([BoulderTag]byte)]int
+competitor_score :: proc(c: Competitor) -> f32 {
+	scores: [len([BoulderTag]byte)]f32
 
 	top := c.top
 	flash := c.flash
@@ -183,7 +184,7 @@ parse_competitor_csv :: proc(competitors: ^[dynamic]Competitor, data: []byte) {
 		csv_figure_out_where_shit_is(&r)
 
 	// Iterate over the lines
-	for entry, record_index in csv.iterator_next(&r) {
+	for entry in csv.iterator_next(&r) {
 		submission_time: i64 = parse_submission_time(entry[submission_time])
 
 		ctgy: Category
