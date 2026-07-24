@@ -3,8 +3,6 @@ package score
 import "core:math"
 import "core:sort"
 
-TOP_N_BOULDERS :: 10
-
 FLASH_SCORE :: 110
 TOP_SCORE :: 100
 ZONE_SCORE :: 50
@@ -30,8 +28,7 @@ flash_score :: proc "contextless" (b: Boulder) -> f32 { return FLASH_SCORE * dec
 top_score :: proc "contextless" (b: Boulder) -> f32 { return TOP_SCORE * decay(b) }
 zone_score :: proc "contextless" (b: Boulder) -> f32 { return ZONE_SCORE * decay(b) }
 
-// Only adds the top_n boulders to the score
-competitor_score :: proc(c: Competitor, stats: [BoulderTag]Boulder) -> f32 {
+competitor_score :: proc(c: Competitor, stats: [BoulderTag]Boulder, topn: int) -> f32 {
 	scores: [len([BoulderTag]byte)]f32
 
 	for b, tag in stats {
@@ -43,6 +40,10 @@ competitor_score :: proc(c: Competitor, stats: [BoulderTag]Boulder) -> f32 {
 
     sort.quick_sort(scores[:])
 
-    start := len(scores) - min(len(scores), TOP_N_BOULDERS)
-    return math.sum(scores[start:])
+    if topn == 0 {
+        return math.sum(scores[:])
+    } else {
+        start := len(scores) - min(len(scores), topn)
+        return math.sum(scores[start:])
+    }
 }

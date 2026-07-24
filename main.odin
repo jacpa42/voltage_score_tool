@@ -1,5 +1,6 @@
 package score
 
+import "core:flags"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -10,6 +11,12 @@ import "core:strings"
 
 dist :: strings.levenshtein_distance
 
+Opts :: struct {
+    csv: ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
+    top_n: int `usage:"Include only top n boulders. Zero means use all boulders."`,
+    same_pool: bool `usage:"Don't seperate the men and women when calculating scores."`,
+}
+
 main :: proc() {
 	context.logger.procedure = logfn
 	context.logger.lowest_level = .Info
@@ -18,8 +25,15 @@ main :: proc() {
 	mem.arena_init(&arena, make([]byte, 512 * 1024))
 	context.allocator = mem.arena_allocator(&arena)
 
-	csv_data, csv_err := os.read_entire_file(os.stdin, context.allocator)
+    // Parse command line options
+    opts: Opts
+	style : flags.Parsing_Style = .Unix
+	flags.parse_or_exit(&opts, os.args, style)
+
+    // Load the file data into memory
+	csv_data, csv_err := os.read_entire_file(opts.csv, context.allocator)
 	assert(csv_err == nil)
+    os.close(opts.csv)
 
 	// Parse csv :)
 	competitors := make([dynamic]Competitor, 0, 256)
@@ -29,16 +43,32 @@ main :: proc() {
 	remove_duplicate_competitors(&competitors)
 
 	// Calculate the total number of tops and stuff for each boulder
-    stats: [BoulderTag]Boulder
+    combined : [BoulderTag]Boulder
+    stats: [Category][BoulderTag]Boulder
     for c in competitors[:] {
-		for b in c.flash { stats[b].flashes += 1 }
-		for b in c.top   { stats[b].tops += 1    }
-		for b in c.zone  { stats[b].zones += 1   }
+		for b in c.flash {
+            stats[c.category][b].flashes += 1
+            combined[b].flashes += 1
+        }
+		for b in c.top   {
+            stats[c.category][b].tops += 1
+            combined[b].tops += 1
+        }
+		for b in c.zone  {
+            stats[c.category][b].zones += 1
+            combined[b].zones += 1
+        }
 	}
 
-	// Calculate the player scores
-	for &c in competitors[:] {
-        c.score = competitor_score(c, stats)
+    // Calculate the player scores
+    if opts.same_pool {
+        for &c in competitors[:] {
+            c.score = competitor_score(c, combined, opts.top_n)
+        }
+    } else {
+        for &c in competitors[:] {
+            c.score = competitor_score(c, stats[c.category], opts.top_n)
+        }
     }
 
 	// Sort by man/women and by score
@@ -66,7 +96,7 @@ competitors_are_maybe_the_same :: proc(a, b: Competitor, tolerance := 3) -> bool
 	if a.category != b.category {return false}
 
 	return(
-		dist(a.email, b.email) < tolerance &&
+		// dist(a.email, b.email) < tolerance &&
 		dist(a.first_name, b.first_name) < tolerance &&
 		dist(a.last_name, b.last_name) < tolerance \
 	)

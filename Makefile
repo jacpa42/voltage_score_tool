@@ -5,7 +5,7 @@ RELEASE_FLAGS := $(COMMON_FLAGS) -o:speed -lto:thin-files -no-bounds-check -vet-
 .PHONY: r rr
 
 r:
-	odin run . $(DEBUG_FLAGS) < "/home/jacob/Downloads/Resistance 2026 Qualifiers.csv"
+	odin run . $(DEBUG_FLAGS) -- --csv "/home/jacob/Downloads/Resistance Qualifiers.csv" --top-n=10 --same-pool
 rr:
-	odin run . $(RELEASE_FLAGS) < "/home/jacob/Downloads/Resistance Qualifiers.csv"
+	odin run . $(RELEASE_FLAGS) -- --csv "/home/jacob/Downloads/Resistance Qualifiers.csv" --top-n=10 --same-pool
 	strip score
