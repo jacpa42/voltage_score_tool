@@ -1,7 +1,7 @@
 package score
 
-import "core:flags"
 import "base:runtime"
+import "core:flags"
 import "core:fmt"
 import "core:log"
 import "core:mem"
@@ -9,12 +9,12 @@ import "core:os"
 import "core:sort"
 import "core:strings"
 
-dist :: strings.levenshtein_distance
-
 Opts :: struct {
-    csv: ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
-    top_n: int `usage:"Include only top n boulders. Zero means use all boulders."`,
-    same_pool: bool `usage:"Don't seperate the men and women when calculating scores."`,
+	csv:       ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
+	top_n:     int `usage:"Include only top n boulders. Zero means use all boulders."`,
+	verbose:   bool `usage:"Print out all information"`,
+	same_pool: bool `usage:"Don't separate the men and women when calculating scores."`,
+	finalists: bool `usage:"Only print finalists"`,
 }
 
 main :: proc() {
@@ -25,15 +25,15 @@ main :: proc() {
 	mem.arena_init(&arena, make([]byte, 512 * 1024))
 	context.allocator = mem.arena_allocator(&arena)
 
-    // Parse command line options
-    opts: Opts
-	style : flags.Parsing_Style = .Unix
+	// Parse command line options
+	opts: Opts
+	style: flags.Parsing_Style = .Unix
 	flags.parse_or_exit(&opts, os.args, style)
 
-    // Load the file data into memory
+	// Load the file data into memory
 	csv_data, csv_err := os.read_entire_file(opts.csv, context.allocator)
 	assert(csv_err == nil)
-    os.close(opts.csv)
+	os.close(opts.csv)
 
 	// Parse csv :)
 	competitors := make([dynamic]Competitor, 0, 256)
@@ -43,33 +43,33 @@ main :: proc() {
 	remove_duplicate_competitors(&competitors)
 
 	// Calculate the total number of tops and stuff for each boulder
-    combined : [BoulderTag]Boulder
-    stats: [Category][BoulderTag]Boulder
-    for c in competitors[:] {
+	combined: [BoulderTag]Boulder
+	stats: [Category][BoulderTag]Boulder
+	for c in competitors[:] {
 		for b in c.flash {
-            stats[c.category][b].flashes += 1
-            combined[b].flashes += 1
-        }
-		for b in c.top   {
-            stats[c.category][b].tops += 1
-            combined[b].tops += 1
-        }
-		for b in c.zone  {
-            stats[c.category][b].zones += 1
-            combined[b].zones += 1
-        }
+			stats[c.category][b].flashes += 1
+			combined[b].flashes += 1
+		}
+		for b in c.top {
+			stats[c.category][b].tops += 1
+			combined[b].tops += 1
+		}
+		for b in c.zone {
+			stats[c.category][b].zones += 1
+			combined[b].zones += 1
+		}
 	}
 
-    // Calculate the player scores
-    if opts.same_pool {
-        for &c in competitors[:] {
-            c.score = competitor_score(c, combined, opts.top_n)
-        }
-    } else {
-        for &c in competitors[:] {
-            c.score = competitor_score(c, stats[c.category], opts.top_n)
-        }
-    }
+	// Calculate the player scores
+	if opts.same_pool {
+		for &c in competitors[:] {
+			c.score = competitor_score(c, combined, opts.top_n)
+		}
+	} else {
+		for &c in competitors[:] {
+			c.score = competitor_score(c, stats[c.category], opts.top_n)
+		}
+	}
 
 	// Sort by man/women and by score
 	sort.quick_sort_proc(competitors[:], proc(lhs, rhs: Competitor) -> int {
@@ -80,26 +80,66 @@ main :: proc() {
 		}
 	})
 
+	// print the boulder scores
+	if opts.same_pool {
+		for b, t in combined {
+			fmt.eprintfln("{} : {} points", t, top_score(b))
+		}
+		fmt.eprintfln("")
+	} else {
+		for c in Category {
+			for b, t in stats[c] {
+				fmt.eprintfln("{} {} : {} points", c, t, top_score(b))
+			}
+			fmt.eprintfln("")
+		}
+	}
+
+
+	w, m: int
 	for c in competitors[:] {
-		fmt.eprintfln(
-			"{} %5.2f : {} {} | {}",
-			c.category,
-			c.score,
-			c.first_name,
-			c.last_name,
-			c.email,
-		)
+
+		i: int
+		switch c.category {
+		case .mens:
+			m += 1
+			i = m
+		case .womens:
+			w += 1
+			i = w
+		}
+
+		if i <= 6 || !opts.finalists {
+			if opts.verbose {
+				fmt.eprintfln("%3d %#v", i, c)
+			} else {
+				fmt.eprintfln(
+					"%3d {} %5.2f : {} {} | {}",
+					i,
+					c.category,
+					c.score,
+					c.first_name,
+					c.last_name,
+					c.email,
+				)
+			}
+		}
 	}
 }
 
 competitors_are_maybe_the_same :: proc(a, b: Competitor, tolerance := 3) -> bool {
 	if a.category != b.category {return false}
 
+	// fmt.eprintfln("|{} - {}| = {}", a.first_name, b.first_name, dist(a.first_name, b.first_name))
+	// fmt.eprintfln("|{} - {}| = {}", a.email, b.email, dist(a.email, b.email))
+	// fmt.eprintfln("|{} - {}| = {}\n", a.last_name, b.last_name, dist(a.last_name, b.last_name))
+
 	return(
-		// dist(a.email, b.email) < tolerance &&
 		dist(a.first_name, b.first_name) < tolerance &&
+		dist(a.email, b.email) < tolerance &&
 		dist(a.last_name, b.last_name) < tolerance \
 	)
+
 }
 
 remove_duplicate_competitors :: proc(competitors: ^[dynamic]Competitor) {
@@ -131,6 +171,13 @@ remove_duplicate_competitors :: proc(competitors: ^[dynamic]Competitor) {
 
 		i += 1
 	}
+}
+
+dist :: proc(a, b: string) -> int {
+	la, lb: string
+	la = strings.to_lower(a)
+	lb = strings.to_lower(b)
+	return strings.levenshtein_distance(la, lb)
 }
 
 logfn :: proc(
