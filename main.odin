@@ -83,15 +83,15 @@ main :: proc() {
 	// print the boulder scores
 	if opts.same_pool {
 		for b, t in combined {
-			fmt.eprintfln("{} : {} points", t, top_score(b))
+			fmt.printfln("{} : {} points", t, top_score(b))
 		}
-		fmt.eprintfln("")
+		fmt.printfln("")
 	} else {
 		for c in Category {
 			for b, t in stats[c] {
-				fmt.eprintfln("{} {} : {} points", c, t, top_score(b))
+				fmt.printfln("{} {} : {} points", c, t, top_score(b))
 			}
-			fmt.eprintfln("")
+			fmt.printfln("")
 		}
 	}
 
@@ -111,9 +111,9 @@ main :: proc() {
 
 		if i <= 6 || !opts.finalists {
 			if opts.verbose {
-				fmt.eprintfln("%3d %#v", i, c)
+				fmt.printfln("%3d %#v", i, c)
 			} else {
-				fmt.eprintfln(
+				fmt.printfln(
 					"%3d {} %5.2f : {} {} | {}",
 					i,
 					c.category,
