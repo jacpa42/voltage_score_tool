@@ -5,12 +5,10 @@ import "core:math/bits"
 import "core:strconv"
 import "core:strings"
 
-BOULDERS_START_AT_NUMBER :: 1
-
 contains :: strings.contains
 starts_with :: strings.starts_with
 
-Column :: int
+CsvColumn :: int
 
 Category :: enum {
 	mens,
@@ -118,7 +116,7 @@ csv_figure_out_where_shit_is :: proc(
 	reader: ^csv.Reader,
 ) -> (
     submission_time, category, email, first_name, last_name: int,
-	boulder_csv_column: [BoulderTag]Column,
+	boulder_csv_column: [BoulderTag]CsvColumn,
 ) {
     submission_time = -1
     category = -1
@@ -144,8 +142,11 @@ csv_figure_out_where_shit_is :: proc(
 			boulder_number := take_first_number(str)
 			if boulder_number == bits.U32_MAX {continue}
 
+
+            BOULDERS_START_AT_NUMBER :: 1
+
 			assert(boulder_number >= BOULDERS_START_AT_NUMBER)
-            tag:=BoulderTag(boulder_number - BOULDERS_START_AT_NUMBER)
+            tag := BoulderTag(boulder_number - BOULDERS_START_AT_NUMBER)
 			boulder_csv_column[tag] = col
 		}
 	}
