@@ -5,40 +5,37 @@ import "base:runtime"
 import "core:flags"
 import "core:fmt"
 import "core:log"
-import "core:mem"
 import "core:os"
 import "core:sort"
 import "core:strings"
 
 Opts :: struct {
-	csv:             ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
-	top_n:           int `usage:"Include only top n boulders. Zero means use all boulders."`,
+	top_n:           int `usage:"Include only top n boulders when scoring. 0 means use all boulders."`,
 	verbosity:       int `usage:"0: position score name. 1: position score name email. 2: everything"`,
-	same_pool:       bool `usage:"Don't separate the men and women when calculating scores."`,
 	num_competitors: int `usage:"Print only this many competitors from each category. 0 means print all."`,
+	same_pool:       bool `usage:"Don't separate the men and women when calculating scores."`,
+	csv:             ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
 }
 
 main :: proc() {
 	context.logger.procedure = logfn
 	context.logger.lowest_level = .Info
-
-	arena: mem.Arena
-	mem.arena_init(&arena, make([]byte, 512 * 1024))
-	context.allocator = mem.arena_allocator(&arena)
+    context.allocator = context.temp_allocator
 
 	// Parse command line options
 	opts: Opts
 	style: flags.Parsing_Style = .Unix
 	flags.parse_or_exit(&opts, os.args, style)
 
+    // Sanitize the options
     if opts.num_competitors < 1 { opts.num_competitors = bits.INT_MAX }
 
-    opts.verbosity = clamp(opts.verbosity, 0, 2)
-    print_c: #type proc(c: Competitor, pos: int)
-    switch opts.verbosity {
-    case 0: print_c = verbose0
-    case 1: print_c = verbose1
-    case 2: print_c = verbose2
+    // Sanitize the options
+    print_c: #type proc(pos: int, c: Competitor)
+    switch clamp(opts.verbosity, 0, 2) {
+    case 0: print_c = verbose_print_0
+    case 1: print_c = verbose_print_1
+    case 2: print_c = verbose_print_2
     case: unreachable()
     }
 
@@ -102,7 +99,7 @@ main :: proc() {
                 return -1
             }
 		} else {
-			return int(rhs.category) - int(lhs.category)
+			return int(lhs.category) - int(rhs.category)
 		}
 	})
 
@@ -122,29 +119,22 @@ main :: proc() {
 	}
 
 	w, m: int
-	for c in competitors[:] {
+	for c in competitors {
 
 		i: int
 		switch c.category {
-		case .mens:
-			m += 1
-			i = m
-		case .womens:
-			w += 1
-			i = w
+		case .mens:   m += 1; i = m
+		case .womens: w += 1; i = w
 		}
 
-        if i == 1 {
-			fmt.printfln("")
-        }
+        if i == 1 { fmt.printfln("") }
 
-		if i <= opts.num_competitors {
-            print_c(c, i)
-		}
+		if i <= opts.num_competitors { print_c(i, c) }
+
 	}
 }
 
-verbose0 :: proc(c: Competitor, pos: int) {
+verbose_print_0 :: proc(pos: int, c: Competitor) {
     fmt.printfln(
         "%3d %5.2f {} {}",
         pos,
@@ -154,7 +144,7 @@ verbose0 :: proc(c: Competitor, pos: int) {
     )
 }
 
-verbose1 :: proc(c: Competitor, pos: int) {
+verbose_print_1 :: proc(pos: int, c: Competitor) {
     fmt.printfln(
         "%3d {} %5.2f : {} {} | {}",
         pos,
@@ -166,31 +156,25 @@ verbose1 :: proc(c: Competitor, pos: int) {
     )
 }
 
-
-verbose2 :: proc(c: Competitor, pos: int) {
+verbose_print_2 :: proc(pos: int, c: Competitor) {
     fmt.printfln("%3d %#v", pos, c)
 }
 
 competitors_are_maybe_the_same :: proc(a, b: Competitor, tolerance := 3) -> bool {
 	if a.category != b.category {return false}
 
-	// fmt.eprintfln("|{} - {}| = {}", a.first_name, b.first_name, dist(a.first_name, b.first_name))
-	// fmt.eprintfln("|{} - {}| = {}", a.email, b.email, dist(a.email, b.email))
-	// fmt.eprintfln("|{} - {}| = {}\n", a.last_name, b.last_name, dist(a.last_name, b.last_name))
-
 	return(
 		dist(a.first_name, b.first_name) < tolerance &&
 		dist(a.email, b.email) < tolerance &&
 		dist(a.last_name, b.last_name) < tolerance \
 	)
-
 }
 
 remove_duplicate_competitors :: proc(competitors: ^[dynamic]Competitor) {
 	i, j: int
-	i_loop: for i < len(competitors) {
+	outer: for i < len(competitors) {
 		j = i + 1
-		j_loop: for j < len(competitors) {
+		inner: for j < len(competitors) {
 			if competitors_are_maybe_the_same(competitors[i], competitors[j]) {
 				earlier, later: int
 				if competitors[i].submission_time > competitors[j].submission_time {
@@ -206,8 +190,8 @@ remove_duplicate_competitors :: proc(competitors: ^[dynamic]Competitor) {
 				)
 
 				unordered_remove(competitors, earlier)
-				if earlier == j {continue j_loop}
-				if earlier == i {continue i_loop}
+				if earlier == j {continue inner}
+				if earlier == i {continue outer}
 			}
 
 			j += 1
