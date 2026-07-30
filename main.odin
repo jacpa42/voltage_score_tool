@@ -11,7 +11,7 @@ import "core:strings"
 
 Opts :: struct {
 	top_n:           int `usage:"Include only top n boulders when scoring. 0 means use all boulders."`,
-	verbosity:       int `usage:"0: position score name. 1: position score name email. 2: everything"`,
+	verbosity:       int `usage:"0: position name. 1: position score name email. 2: everything"`,
 	num_competitors: int `usage:"Print only this many competitors from each category. 0 means print all."`,
 	same_pool:       bool `usage:"Don't separate the men and women when calculating scores."`,
 	csv:             ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
@@ -23,21 +23,7 @@ main :: proc() {
     context.allocator = context.temp_allocator
 
 	// Parse command line options
-	opts: Opts
-	style: flags.Parsing_Style = .Unix
-	flags.parse_or_exit(&opts, os.args, style)
-
-    // Sanitize the options
-    if opts.num_competitors < 1 { opts.num_competitors = bits.INT_MAX }
-
-    // Sanitize the options
-    print_c: #type proc(pos: int, c: Competitor)
-    switch clamp(opts.verbosity, 0, 2) {
-    case 0: print_c = verbose_print_0
-    case 1: print_c = verbose_print_1
-    case 2: print_c = verbose_print_2
-    case: unreachable()
-    }
+    opts, print_c := parse_opts()
 
 	// Load the file data into memory
 	csv_data, csv_err := os.read_entire_file(opts.csv, context.allocator)
@@ -45,7 +31,7 @@ main :: proc() {
 	os.close(opts.csv)
 
 	// Parse csv :)
-	competitors := make([dynamic]Competitor, 0, 256)
+	competitors := make([dynamic]Competitor, 0, 512)
 	parse_competitor_csv(&competitors, csv_data)
 
 	// Remove duplicate entries
@@ -91,13 +77,7 @@ main :: proc() {
 	// Sort by man/women and by score
 	sort.quick_sort_proc(competitors[:], proc(lhs, rhs: Competitor) -> int {
 		if rhs.category == lhs.category {
-            if rhs.score > lhs.score {
-                return 1
-            } else if rhs.score == lhs.score {
-                return 0
-            } else {
-                return -1
-            }
+            return sort.compare_f32s(rhs.score, lhs.score)
 		} else {
 			return int(lhs.category) - int(rhs.category)
 		}
@@ -134,11 +114,32 @@ main :: proc() {
 	}
 }
 
+parse_opts :: proc() -> (
+    opts: Opts,
+    print_c: #type proc(pos: int, c: Competitor),
+) {
+    // Parse command line options
+    flags.parse_or_exit(&opts, os.args, .Unix)
+
+    // Sanitize the options
+    opts.verbosity = clamp(opts.verbosity, 0, 2)
+    if opts.num_competitors < 1 { opts.num_competitors = bits.INT_MAX }
+
+    // Sanitize the options
+    switch opts.verbosity {
+    case 0: print_c = verbose_print_0
+    case 1: print_c = verbose_print_1
+    case 2: print_c = verbose_print_2
+    case: unreachable()
+    }
+
+    return
+}
+
 verbose_print_0 :: proc(pos: int, c: Competitor) {
     fmt.printfln(
-        "%3d %5.2f {} {}",
+        "%3d {} {}",
         pos,
-        c.score,
         c.first_name,
         c.last_name,
     )
@@ -202,9 +203,8 @@ remove_duplicate_competitors :: proc(competitors: ^[dynamic]Competitor) {
 }
 
 dist :: proc(a, b: string) -> int {
-	la, lb: string
-	la = strings.to_lower(a)
-	lb = strings.to_lower(b)
+	la := strings.to_lower(a)
+	lb := strings.to_lower(b)
 	return strings.levenshtein_distance(la, lb)
 }
 

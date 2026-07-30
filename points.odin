@@ -4,10 +4,6 @@ import "core:math"
 import "core:math/bits"
 import "core:sort"
 
-FLASH_SCORE :: 110
-TOP_SCORE :: 100
-ZONE_SCORE :: 50
-
 Boulder :: struct {
 	tops:    u32,
 	flashes: u32,
@@ -31,25 +27,26 @@ max_boulder_in :: proc(b: bit_set[BoulderTag]) -> BoulderTag {
     return BoulderTag(63 - bits.count_leading_zeros(transmute(u64)(b)))
 }
 
-decay :: proc "contextless" (b: Boulder) -> f32 {
-	return 1.0 / f32(max(1, b.flashes + b.tops))
-}
-
-flash_score :: proc "contextless" (b: Boulder) -> f32 { return FLASH_SCORE * decay(b) }
-top_score :: proc "contextless" (b: Boulder) -> f32 { return TOP_SCORE * decay(b) }
-zone_score :: proc "contextless" (b: Boulder) -> f32 { return ZONE_SCORE * decay(b) }
+    decay :: proc "contextless" (b: Boulder) -> f32 {
+        return 1.0 / f32(max(1, 2 * b.flashes + b.tops + b.zones / 2))
+    }
+    flash_score :: proc "contextless" (b: Boulder) -> f32 { return 1100 * decay(b) }
+    top_score   :: proc "contextless" (b: Boulder) -> f32 { return 1000 * decay(b) }
+    zone_score  :: proc "contextless" (b: Boulder) -> f32 { return  500 * decay(b) }
 
 competitor_score :: proc(c: Competitor, stats: [BoulderTag]Boulder, topn: int) -> f32 {
 	scores: [len([BoulderTag]byte)]f32
 
 	for b, tag in stats {
-		if tag in
-		   c.flash {scores[tag] = flash_score(b)} else if tag in c.top {scores[tag] = top_score(b)} else if tag in c.zone {scores[tag] = zone_score(b)} else {scores[tag] = 0}
+		if      tag in c.flash { scores[tag] = flash_score(b) }
+        else if tag in c.top   { scores[tag] = top_score(b)   }
+        else if tag in c.zone  { scores[tag] = zone_score(b)  }
+        else                   { scores[tag] = 0              }
 	}
 
 	sort.quick_sort(scores[:])
 
-	if topn == 0 {
+	if topn <= 0 {
 		return math.sum(scores[:])
 	} else {
 		start := len(scores) - min(len(scores), topn)
