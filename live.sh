@@ -20,6 +20,7 @@ export SCORER="${SCORER:-./score}"          # the compiled Odin scorer
 export SCORER_ARGS="${SCORER_ARGS:-}"       # extra scorer flags, e.g. "--top_n 8" or "--same_pool"
 export PORT="${PORT:-8787}"                 # local port for the leaderboard page
 export API_URL="${API_URL:-https://kragsentrale.co.za/api/v0}"
+export SWORD_URL="${SWORD_URL:-https://kragsentrale.co.za/signup-sword.png}"
 export TOKEN_FILE="${TOKEN_FILE:-$HOME/.cache/krag_token}"   # jwt saved by krag_cli
 VERSION=8                                   # shown on the page, so you can tell which copy is running
 
@@ -92,28 +93,60 @@ render() {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="$INTERVAL">
 <title>$(printf '%s' "$comp" | html_escape) – Live</title>
 <style>
   :root { --bg:#000; --fg:#fff; --accent:#607b98; color-scheme:dark; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:3.4vmin/1.35 system-ui, sans-serif; text-transform:uppercase; letter-spacing:.04em; }
-  main { display:grid; grid-template-columns:1fr 1fr; gap:4vmin; padding:4vmin; }
-  h2 { margin:0 0 1.5vmin; font-size:4.5vmin; color:var(--accent); font-weight:600; }
+  main { display:grid; grid-template-columns:1fr 38vh 1fr; gap:3vmin; padding:4vmin; }
+  .gap { pointer-events:none; } /* empty middle column: the sword sits here */
+  h2 { margin:0 0 1.5vmin; text-align:center; font-size:4.5vmin; color:var(--accent); font-weight:600; }
   ol { list-style:none; margin:0; padding:0; }
-  li { display:grid; grid-template-columns:7vmin 1fr auto; gap:2.5vmin; padding:1vmin 1.5vmin; border-bottom:1px solid #222; }
+  li { background:rgba(0,0,0,.55); display:grid; grid-template-columns:7vmin 1fr auto; gap:2.5vmin; padding:1vmin 1.5vmin; border-bottom:1px solid #222; }
   li.final { background:var(--accent); border-color:var(--accent); font-weight:600; }
   li.empty { display:block; color:var(--accent); border:0; }
   .pos { text-align:right; }
   .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .score { font-variant-numeric:tabular-nums; }
+  /* 3D spinning sword from the sign-up page, in the middle column between Men and Women */
+  .scene { position:fixed; inset:0; z-index:-1; pointer-events:none; perspective:1200px; display:grid; place-items:center; opacity:.9; }
+  .cover { position:relative; height:90vh; height:90svh; aspect-ratio:474/1277; transform-style:preserve-3d; animation:spin 16s linear infinite; }
+  .cover img { position:absolute; inset:0; width:100%; height:100%; }
+  @keyframes spin { from { transform:rotateX(15deg) rotateY(0) rotateZ(-10deg); } to { transform:rotateX(15deg) rotateY(360deg) rotateZ(-10deg); } }
+  @media (prefers-reduced-motion: reduce) { .cover { animation:none; } }
 </style>
 </head>
 <body>
+<div class="scene" aria-hidden="true"><div class="cover" id="sword"></div></div>
 <main>
 $(column mens "Men" "$rows")
+<div class="gap"></div>
 $(column womens "Women" "$rows")
 </main>
+<script>
+(function () {
+  // Build the 3D sword: 12 copies 1.5px apart; inner ones darker so the edge looks solid
+  var sword = document.getElementById("sword"), N = 12;
+  for (var i = 0; i < N; i++) {
+    var img = new Image();
+    img.src = "$SWORD_URL"; img.alt = "";
+    img.style.transform = "translateZ(" + ((i - (N - 1) / 2) * 1.5) + "px)";
+    if (i !== 0 && i !== N - 1) img.style.filter = "brightness(.45)";
+    img.onerror = function () { if (sword.parentElement) sword.parentElement.remove(); };
+    sword.appendChild(img);
+  }
+  // Swap in fresh rankings without reloading, so the sword keeps spinning smoothly
+  setInterval(function () {
+    fetch(location.href, { cache: "no-store" })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var fresh = new DOMParser().parseFromString(html, "text/html").querySelector("main");
+        if (fresh) document.querySelector("main").replaceWith(fresh);
+      })
+      .catch(function () {});
+  }, $(( INTERVAL * 1000 )));
+})();
+</script>
 </body>
 </html>
 HTML
