@@ -10,11 +10,11 @@ import "core:sort"
 import "core:strings"
 
 Opts :: struct {
+	csv:             ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
 	top_n:           int `usage:"Include only top n boulders when scoring. 0 means use all boulders."`,
 	verbosity:       int `usage:"0: position name. 1: position score name email. 2: everything"`,
 	num_competitors: int `usage:"Print only this many competitors from each category. 0 means print all."`,
 	same_pool:       bool `usage:"Don't separate the men and women when calculating scores."`,
-	csv:             ^os.File `args:"pos=0,required,file=r" usage:"Input csv data."`,
 }
 
 main :: proc() {
@@ -24,10 +24,19 @@ main :: proc() {
 
 	// Parse command line options
 	opts, print_c := parse_opts()
+	read_all :: proc(f: ^os.File) -> []byte {
+		data := make([dynamic]byte, 0, 64 * 1024)
+		chunk: [4096]byte
+		for {
+			n, err := os.read(f, chunk[:])
+			append(&data, ..chunk[:n])
+			if err != nil || n == 0 do break
+		}
+		return data[:]
+	}
 
 	// Load the file data into memory
-	csv_data, csv_err := os.read_entire_file(opts.csv, context.allocator)
-	assert(csv_err == nil)
+	csv_data := read_all(opts.csv)
 	os.close(opts.csv)
 
 	// Parse csv :)

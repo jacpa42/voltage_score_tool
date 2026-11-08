@@ -48,12 +48,12 @@ parse_competitor_csv :: proc(competitors: ^[dynamic]Competitor, data: []byte) {
 
 	// Extract the first line to define the indices of the columns we care
 	// about for scoring
-	submission_time, category, email, first_name, last_name, boulder_csv_column := csv_figure_out_where_shit_is(&r)
+	submission_time, category, email, first_name, last_name, results := csv_figure_out_where_shit_is(&r)
 
 	// Iterate over the lines
 	for entry in csv.iterator_next(&r) {
 		submission_time: i64 = parse_submission_time(entry[submission_time])
-        assert(submission_time > 0)
+        assert(submission_time >= 0)
 
 		ctgy: Category
 		if is_mens_column(entry[category])        { ctgy = .mens }
@@ -61,11 +61,13 @@ parse_competitor_csv :: proc(competitors: ^[dynamic]Competitor, data: []byte) {
         else { unreachable() }
 
         flash, top, zone: bit_set[BoulderTag]
-        for column, tag in boulder_csv_column {
-            switch entry[column] {
-            case "Flash": flash |= {tag}
-            case "Top":   top   |= {tag}
-            case "Zone":  zone  |= {tag}
+        for ch, i in entry[results] {
+            if i >= 64 do break
+            tag := BoulderTag(i)
+            switch ch {
+            case 'f': flash |= {tag}
+            case 't': top   |= {tag}
+            case 'z': zone  |= {tag}
             }
         }
 
@@ -112,21 +114,21 @@ parse_submission_time :: proc(str: string) -> (kinda_timestamp: i64) {
 csv_figure_out_where_shit_is :: proc(
 	reader: ^csv.Reader,
 ) -> (
-    submission_time, category, email, first_name, last_name: int,
-	boulder_csv_column: [BoulderTag]CsvColumn,
+    submission_time, category, email, first_name, last_name, results: int,
 ) {
     submission_time = -1
     category = -1
     email = -1
     first_name = -1
     last_name = -1
+    results = -1
 
-    is_boulder_column ::         proc(str: string) -> bool { return contains(str, "Boulder") }
     is_email_column ::           proc(str: string) -> bool { return starts_with(str, "Username") || starts_with(str, "Email") }
     is_submission_time_column :: proc(str: string) -> bool { return starts_with(str, "Timestamp") }
     is_first_name_column ::      proc(str: string) -> bool { return contains(str, "First") && contains(str, "Name") }
     is_last_name_column ::       proc(str: string) -> bool { return contains(str, "Last") && contains(str, "Name") }
     is_category_column ::        proc(str: string) -> bool { return contains(str, "Category") }
+    is_results_column ::         proc(str: string) -> bool { return str == "Results" }
 
 	record, _, _, _ := csv.iterator_next(reader)
 	for str, col in record {
@@ -135,15 +137,7 @@ csv_figure_out_where_shit_is :: proc(
         else if first_name == -1      && is_first_name_column(str)      { first_name = col      }
         else if last_name == -1       && is_last_name_column(str)       { last_name = col       }
         else if category == -1        && is_category_column(str)        { category = col        }
-        else if is_boulder_column(str) {
-			boulder_number := take_first_number(str)
-			if boulder_number == bits.U32_MAX {continue}
-
-            BOULDERS_START_AT_NUMBER :: 1
-			assert(boulder_number >= BOULDERS_START_AT_NUMBER)
-            tag := BoulderTag(boulder_number - BOULDERS_START_AT_NUMBER)
-			boulder_csv_column[tag] = col
-		}
+        else if results == -1         && is_results_column(str)         { results = col         }
 	}
 
     assert(submission_time >= 0)
@@ -151,6 +145,7 @@ csv_figure_out_where_shit_is :: proc(
     assert(email >= 0)
     assert(first_name >= 0)
     assert(last_name >= 0)
+    assert(results >= 0)
 
     return
 }
