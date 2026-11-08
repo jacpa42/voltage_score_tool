@@ -1,10 +1,10 @@
 package score
 
-import "core:math/bits"
 import "base:runtime"
 import "core:flags"
 import "core:fmt"
 import "core:log"
+import "core:math/bits"
 import "core:os"
 import "core:sort"
 import "core:strings"
@@ -20,10 +20,10 @@ Opts :: struct {
 main :: proc() {
 	context.logger.procedure = logfn
 	context.logger.lowest_level = .Info
-    context.allocator = context.temp_allocator
+	context.allocator = context.temp_allocator
 
 	// Parse command line options
-    opts, print_c := parse_opts()
+	opts, print_c := parse_opts()
 
 	// Load the file data into memory
 	csv_data, csv_err := os.read_entire_file(opts.csv, context.allocator)
@@ -55,13 +55,13 @@ main :: proc() {
 			combined[b].zones += 1
 		}
 
-        max_boulder_logged = max(
-            max_boulder_logged,
-            max_boulder_in(c.zone),
-            max_boulder_in(c.top),
-            max_boulder_in(c.flash),
-        )
-    }
+		max_boulder_logged = max(
+			max_boulder_logged,
+			max_boulder_in(c.zone),
+			max_boulder_in(c.top),
+			max_boulder_in(c.flash),
+		)
+	}
 
 	// Calculate the player scores
 	if opts.same_pool {
@@ -77,7 +77,7 @@ main :: proc() {
 	// Sort by man/women and by score
 	sort.quick_sort_proc(competitors[:], proc(lhs, rhs: Competitor) -> int {
 		if rhs.category == lhs.category {
-            return sort.compare_f32s(rhs.score, lhs.score)
+			return sort.compare_f32s(rhs.score, lhs.score)
 		} else {
 			return int(lhs.category) - int(rhs.category)
 		}
@@ -85,13 +85,13 @@ main :: proc() {
 
 	// print the boulder scores
 	if opts.same_pool {
-		for t in BoulderTag.b01..=max_boulder_logged {
+		for t in BoulderTag.b01 ..= max_boulder_logged {
 			fmt.printfln("{} : {} points", t, top_score(combined[t]))
 		}
-        fmt.printfln("")
+		fmt.printfln("")
 	} else {
 		for c in Category {
-            for t in BoulderTag.b01..=max_boulder_logged {
+			for t in BoulderTag.b01 ..= max_boulder_logged {
 				fmt.printfln("{} {} : {} points", c, t, top_score(stats[c][t]))
 			}
 			fmt.printfln("")
@@ -103,62 +103,60 @@ main :: proc() {
 
 		i: int
 		switch c.category {
-		case .mens:   m += 1; i = m
-		case .womens: w += 1; i = w
+		case .mens:
+			m += 1; i = m
+		case .womens:
+			w += 1; i = w
 		}
 
-        if i == 1 { fmt.printfln("") }
+		if i == 1 {fmt.printfln("")}
 
-		if i <= opts.num_competitors { print_c(i, c) }
+		if i <= opts.num_competitors {print_c(i, c)}
 
 	}
 }
 
-parse_opts :: proc() -> (
-    opts: Opts,
-    print_c: #type proc(pos: int, c: Competitor),
-) {
-    // Parse command line options
-    flags.parse_or_exit(&opts, os.args, .Unix)
+parse_opts :: proc() -> (opts: Opts, print_c: #type proc(pos: int, c: Competitor)) {
+	// Parse command line options
+	flags.parse_or_exit(&opts, os.args, .Unix)
 
-    // Sanitize the options
-    opts.verbosity = clamp(opts.verbosity, 0, 2)
-    if opts.num_competitors < 1 { opts.num_competitors = bits.INT_MAX }
+	// Sanitize the options
+	opts.verbosity = clamp(opts.verbosity, 0, 2)
+	if opts.num_competitors < 1 {opts.num_competitors = bits.INT_MAX}
 
-    // Sanitize the options
-    switch opts.verbosity {
-    case 0: print_c = verbose_print_0
-    case 1: print_c = verbose_print_1
-    case 2: print_c = verbose_print_2
-    case: unreachable()
-    }
+	// Sanitize the options
+	switch opts.verbosity {
+	case 0:
+		print_c = verbose_print_0
+	case 1:
+		print_c = verbose_print_1
+	case 2:
+		print_c = verbose_print_2
+	case:
+		unreachable()
+	}
 
-    return
+	return
 }
 
 verbose_print_0 :: proc(pos: int, c: Competitor) {
-    fmt.printfln(
-        "%3d {} {}",
-        pos,
-        c.first_name,
-        c.last_name,
-    )
+	fmt.printfln("%3d {} {}", pos, c.first_name, c.last_name)
 }
 
 verbose_print_1 :: proc(pos: int, c: Competitor) {
-    fmt.printfln(
-        "%3d {} %5.2f : {} {} | {}",
-        pos,
-        c.category,
-        c.score,
-        c.first_name,
-        c.last_name,
-        c.email,
-    )
+	fmt.printfln(
+		"%3d {} %5.2f : {} {} | {}",
+		pos,
+		c.category,
+		c.score,
+		c.first_name,
+		c.last_name,
+		c.email,
+	)
 }
 
 verbose_print_2 :: proc(pos: int, c: Competitor) {
-    fmt.printfln("%3d %#v", pos, c)
+	fmt.printfln("%3d %#v", pos, c)
 }
 
 competitors_are_maybe_the_same :: proc(a, b: Competitor, tolerance := 3) -> bool {
